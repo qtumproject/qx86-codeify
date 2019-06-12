@@ -49,14 +49,6 @@ struct ContractMapInfo {
     uint32_t reserved;
 } __attribute__((__packed__));
 
-static ContractMapInfo* parseContractData(const uint8_t* contract, const uint8_t** outputCode, const uint8_t** outputData, const uint8_t** outputOptions){
-    ContractMapInfo *map = (ContractMapInfo*) contract;
-    *outputOptions = &contract[sizeof(ContractMapInfo)];
-    *outputCode = &contract[sizeof(ContractMapInfo) + map->optionsSize];
-    *outputData = &contract[sizeof(ContractMapInfo) + map->optionsSize + map->codeSize];
-    return map;
-}
-
 bool readElf = false;
 bool silent = false;
 bool printHex = false;
@@ -79,6 +71,7 @@ int main(int argc, char* argv[]){
             }
             outputName = argv[i];
             correct = true;
+            readOutputFile = false;
         }
         else{
             if(argv[i][0] != '-'){
@@ -87,7 +80,7 @@ int main(int argc, char* argv[]){
             }
         }
         if(strcmp(argv[i], "-elf") == 0){
-            singleStep = true;
+            readElf = true;
             correct = true;
         }
         if(strcmp(argv[i], "-silent") == 0){
@@ -113,12 +106,12 @@ int main(int argc, char* argv[]){
         cerr << "Must specify output file name if using -o" << endl;
         return 1;
     }
-    if(!doElf){
+    if(!readElf){
         cerr << "Must include -elf" << endl;
         return 1;
     }
 
-    if(fileName == ""){
+    if(inputName == ""){
         cerr << "No input file specified" << endl;
         return 1;
     }
@@ -126,7 +119,7 @@ int main(int argc, char* argv[]){
     //read input file
     uint8_t* inputData = nullptr;
     size_t inputLength = 0;
-
+    const size_t maxSize = 0x20000;
     {
         ifstream file(inputName, ios::binary);
         if(!file){
@@ -136,13 +129,13 @@ int main(int argc, char* argv[]){
         inputLength = file.tellg();
         file.seekg(0, std::ios::end);
         inputLength = (uint32_t) (((long)file.tellg()) - (long) inputLength);
-        inputData = new uint8_t[fileLength];
+        inputData = new uint8_t[inputLength];
         file.seekg(0, std::ios::beg);
-        file.read(inputData, maxSize);
+        file.read((char*)inputData, maxSize);
     }
-    ofstream output(cout);
+    ostream *output = &cout;
     if(toFile){
-        output = ofstream(outputName, ios::binary | ios::out);
+        output = new ofstream(outputName, ios::binary | ios::out);
         if(!output){
             cerr << "file \"" << outputName << "\" could not be opened for writing" << endl;
             return 1;
@@ -156,12 +149,12 @@ int main(int argc, char* argv[]){
     size_t codeSize=0;
     size_t dataSize=0;
 
-    if(doElf){
+    if(readElf){
         //load ELF32 file
-        if(!rawOutput){
+        if(!silent){
             cout << "Attempting to load ELF file, should be named .bin if not ELF format" << endl;
         }
-        if(!loadElf(code, &codeSize, data, &dataSize, inputData, inputLength)){
+        if(!loadElf((char*)code, &codeSize, (char*)data, &dataSize, (char*)inputData, inputLength)){
             cerr << "error loading ELF" << endl;
             return -1;
         }
@@ -195,28 +188,31 @@ int main(int argc, char* argv[]){
     memcpy(&out[8], &map.dataSize, sizeof(uint32_t));
     memcpy(&out[12], &map.reserved, sizeof(uint32_t));
     memcpy(&out[16], code, codeSize);
-    memcpy(&out[16 + codesize], data, dataSize);
+    memcpy(&out[16 + codeSize], data, dataSize);
     
     if(!silent){
         cout << "Uncompressed total size: " << dec << totalSize << endl;;
     }
     if(printHex){
         for(int i = 0;i<totalSize;i++){
-            output << hex << setfill('0') << setw(2) << (int)(uint8_t)out[i];
+            *output << hex << setfill('0') << setw(2) << (int)(uint8_t)out[i];
         }
-        cout << endl;
+        *output << endl;
     }else{
         for(int i = 0; i < totalSize; i++){
-            output << out[i];
+            *output << out[i];
         }
-        output << flush;
     }
+    output->flush();
 
     delete[] out;
 
     delete[] code;
     delete[] data;
     delete[] inputData;
+    if(output != &cout){
+        delete output;
+    }
 
     return 0;
     
